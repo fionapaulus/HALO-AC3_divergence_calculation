@@ -1,0 +1,541 @@
+import xarray as xr
+import matplotlib.pyplot as plt
+import os
+from mpl_toolkits.basemap import Basemap
+import numpy as np
+
+
+
+def haversine(lon1, lat1, lon2, lat2):
+    import numpy as np
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    
+    Distance is positive definite, returned in km
+    
+    """
+    # convert decimal degrees to radians 
+    lon1 = np.radians(lon1)
+    lat1 = np.radians(lat1)
+    lon2 = np.radians(lon2)
+    lat2 = np.radians(lat2)
+
+    # haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a)) 
+    r = 6371 # Radius of earth in kilometers. Use 3956 for miles
+    return c * r
+
+# case details
+case_folder='/home/mika2260/Documents/HALO-AC3/CAO/' # should contain an RF... folder (read 'flight' list below) 
+                                                     #...with a Level_1 subfolder containing the radiosonde files
+
+which_circle = 'mid'  #pattern flown - look up in 'flights' list below
+ncd_save = False  #save netcdf output
+
+circle_id = {
+    "first":0,
+    "north":1,
+    "mid":2,
+    "south":3,
+    "polar low":4,
+    "no cirrus":5,
+    }
+
+coordinates = [
+    {"lon":16,"lat":84.4,'lat_up':85.2,'lat_down':83.5,'RF':'RF10','R':65,'p_check':True},
+    {"lon":10,"lat":80.8,'lat_up':81.5,'lat_down':80.1,'RF':'RF11_north','R':60,'p_check':True},
+    {"lon":4.26,"lat":78.66,'lat_up':79.5,'lat_down':77.5,'RF':'RF11_middle','R':60,'p_check':True},
+    {"lon":3.5,"lat":76.29,'lat_up':77.,'lat_down':75.5,'RF':'RF11_south','R':60,'p_check':True},
+    {"lon":0.66,"lat":78.04,'lat_up':80.,'lat_down':76.15,'RF':'RF15','R':145,'p_check':False},
+    {"lon":14.8,"lat":81.2,'lat_up':82.,'lat_down':80.2,'RF':'RF18','R':65,'p_check':False},
+    ]
+
+flights = [
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220329_RF10'},
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220330_RF11'},
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220330_RF11'},
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220330_RF11'},
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220408_RF15'},
+    {"RF":'HALO-AC3_HALO_Dropsondes_20220412_RF18'},
+    ]
+
+## flights for 'mid' pattern
+RF11 = 'HALO-AC3_HALO_Dropsondes_20220330_RF11'
+RF08 = 'HALO-AC3_P5_Dropsondes_20220330_RF08'
+
+## plot map with dropsonde coordinates
+
+fig_map,ax_map = plt.subplots(figsize=[10,10])
+m = Basemap(ax=ax_map,width=891185,height=1525557,\
+            resolution='i',projection='cass',lon_0=4.26,lat_0=78.66)
+
+m.fillcontinents(color=[0.9,0.5,0,0.6],lake_color=[1,1,1,1])
+m.drawparallels(np.arange(0,90,10),labels=[0,0,1,0])
+m.drawmeridians(np.arange(0,360,2),labels=[1,0,0,1])
+m.drawmapboundary(fill_color=[0,0.9,0.9,0.1])
+ax_map.set_title(coordinates[circle_id[which_circle]]['RF'])
+
+## initialize plot for Div-omega profiles
+
+fig,ax = plt.subplots(ncols=2,nrows=1,figsize=[10,10])
+
+
+## height resolution to which all profiles will be interpolated for the circular and rectangular pattern
+alt_exx = xr.open_dataset('/home/mika2260/Documents/HALO-AC3/CAO/HALO-AC3_HALO_Dropsondes_20220330_RF11/Level_1/D20220330_104454QC.nc').gpsalt.data
+alt_ex = alt_exx[~np.isnan(alt_exx)]
+
+alt_rectt = xr.open_dataset('/home/mika2260/Documents/HALO-AC3/CAO/HALO-AC3_P5_Dropsondes_20220330_RF08/Level_1/D20220330_121910QC.nc').gpsalt.data
+alt_rect = alt_rectt[(~np.isnan(alt_rectt)) & (alt_rectt>0)]
+
+for RFc in [flights[circle_id[which_circle]]['RF']]:
+    for level in os.listdir(case_folder+RFc):
+        if level=='Level_1':
+            i_sonde = 0
+
+
+            lat_sel = np.zeros(len(os.listdir(case_folder+RFc+'/'+level)))*np.nan
+            lon_sel = np.zeros(len(os.listdir(case_folder+RFc+'/'+level)))*np.nan
+            lon_vert = np.ones((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            lat_vert = np.ones((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+
+            u_sel = np.zeros((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            v_sel = np.zeros((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            p_sel = np.zeros((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            th_sel = np.zeros((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            rh_sel = np.zeros((len(os.listdir(case_folder+RFc+'/'+level)),int(len(alt_ex))))*np.nan
+            sondes_sel = []
+
+
+            for file in sorted(os.listdir(case_folder+RFc+'/'+level)):
+                if file.endswith('.nc'):
+
+                    sonde=xr.open_dataset(case_folder+RFc+'/'+level+'/'+file,decode_times=False)
+                    if np.nanmax(sonde.lat.data) < coordinates[circle_id[which_circle]]['lat_up'] and np.nanmax(sonde.lat.data) > coordinates[circle_id[which_circle]]['lat_down']:
+                        if haversine(coordinates[circle_id[which_circle]]['lon'],coordinates[circle_id[which_circle]]['lat'], np.nanmean(sonde.lon.data),np.nanmean(sonde.lat.data))>coordinates[circle_id[which_circle]]['R'] and  haversine(coordinates[circle_id[which_circle]]['lon'],coordinates[circle_id[which_circle]]['lat'], np.nanmean(sonde.lon.data),np.nanmean(sonde.lat.data))<coordinates[circle_id[which_circle]]['R']+20:
+                            lat_sel[i_sonde] = np.nanmean(sonde.lat.data)
+                            lon_sel[i_sonde] = np.nanmean(sonde.lon.data)
+                            u_sel[i_sonde,:] = np.interp(alt_ex,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.u_wind.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.u_wind.data[(~np.isnan(sonde.u_wind.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            v_sel[i_sonde,:] = np.interp(alt_ex,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.v_wind.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.v_wind.data[(~np.isnan(sonde.v_wind.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            lon_vert[i_sonde,:] = np.interp(alt_ex,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.lon.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.lon.data[(~np.isnan(sonde.lon.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            lat_vert[i_sonde,:] = np.interp(alt_ex,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.lat.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.lat.data[(~np.isnan(sonde.lat.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            p_sel[i_sonde,:] = np.interp(alt_ex,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.pres.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.pres.data[(~np.isnan(sonde.pres.data)) & (~np.isnan(sonde.gpsalt.data))]))
+
+                            i_sonde = i_sonde + 1
+                            sondes_sel.append(file)
+
+        else:
+            continue
+
+if which_circle == 'mid':
+    for RFr in [RF08]:
+
+        for level in os.listdir(case_folder+RFr):
+            if level=='Level_1':
+                i_sonde = 0
+                lat_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                lon_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                u_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                v_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                p_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                th_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                rh_rect = np.zeros((len(os.listdir(case_folder+RFr+'/'+level)),int(len(alt_rect))))*np.nan
+                sondes_rect = []
+
+                for file in sorted(os.listdir(case_folder+RFr+'/'+level)):
+
+                    if file.endswith('.nc'):
+
+                        sonde=xr.open_dataset(case_folder+RFr+'/'+level+'/'+file,decode_times=False)
+                        if  haversine(4.26,78.66,np.nanmean(sonde.lon.data),np.nanmean(sonde.lat.data))>40:
+                            lat_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.lat.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.lat.data[(~np.isnan(sonde.lat.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            lon_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.lon.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.lon.data[(~np.isnan(sonde.lon.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                            # if (file!='D20220330_152724QC.nc') : #excluding the early sonde at that location
+                            if (file!='D20220330_132412QC.nc') :    #excluding the later sonde at that location
+                                print('here:',file)
+                                u_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.u_wind.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.u_wind.data[(~np.isnan(sonde.u_wind.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                                v_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.v_wind.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.v_wind.data[(~np.isnan(sonde.v_wind.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                                p_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.pres.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.pres.data[(~np.isnan(sonde.pres.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                                th_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.theta.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.theta.data[(~np.isnan(sonde.theta.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                                rh_rect[i_sonde,:] = np.interp(alt_rect,np.squeeze(sonde.gpsalt.data[(~np.isnan(sonde.rh.data)) & (~np.isnan(sonde.gpsalt.data))]),np.squeeze(sonde.rh.data[(~np.isnan(sonde.rh.data)) & (~np.isnan(sonde.gpsalt.data))]))
+                                print('file:',file)
+                                i_sonde = i_sonde + 1
+                                print(i_sonde)
+                                sondes_rect.append(file)
+
+                            else:
+                                lat_rect[i_sonde,:] = np.nan
+                                lon_rect[i_sonde,:] = np.nan
+
+            else:
+                continue
+
+
+## calculate pattern characteristics
+nds = len(lat_sel[~np.isnan(lat_sel)])
+if which_circle=='mid':
+    nds_rect = len(lat_rect[:,0][~np.isnan(lat_rect[:,0])])
+    rect_lat0 = np.nanmean(lat_rect,axis=0)
+    rect_lon0 = np.nanmean(lon_rect,axis=0)
+
+circle_R = np.ones(alt_ex.shape[0])*np.nan
+circle_lon0 = np.ones(alt_ex.shape[0])*np.nan
+circle_lat0 = np.ones(alt_ex.shape[0])*np.nan
+dphi = np.ones(lon_vert.shape)*np.nan
+dl_vert = np.ones(lon_vert.shape)*np.nan
+for i in range(alt_ex.shape[0]):
+        # for j in range(lon_vert.shape[0]):
+        circle_lat0[i] = np.nanmean(lat_vert[:,i])
+        circle_lon0[i] = np.nanmean(lon_vert[:,i])
+        circle_R[i] = np.nanmean( haversine(circle_lon0[i],circle_lat0[i],lon_vert[:,i],lat_vert[:,i])*1000)
+        
+        for j in range(nds):
+            if circle_lat0[i] > lat_vert[j,i]:
+                y_sign= -1
+            else:
+                y_sign= 1
+                
+            if circle_lon0[i] > lon_vert[j,i]:
+                x_sign= -1
+            else:
+                x_sign= 1
+
+            r_unit_x_1 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],lon_vert[j,i],circle_lat0[i] ) 
+            r_unit_y_1 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],circle_lon0[i],lat_vert[j,i] ) 
+            r_tot_1 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],lon_vert[j,i],lat_vert[j,i] ) 
+            r_unit_1 = np.array([(r_unit_x_1*x_sign),(r_unit_y_1*y_sign)])
+
+            if circle_lat0[i] > lat_vert[j-1,i]:
+                y_sign_2= -1
+            else:
+                y_sign_2= 1
+                
+            if circle_lon0[i] > lon_vert[j-1,i]:
+                x_sign_2= -1
+            else:
+                x_sign_2= 1
+
+            r_unit_x_2 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],lon_vert[j-1,i],circle_lat0[i] ) 
+            r_unit_y_2 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],circle_lon0[i],lat_vert[j-1,i] ) 
+            r_tot_2 = 1000. *  haversine(circle_lon0[i],circle_lat0[i],lon_vert[j-1,i],lat_vert[j-1,i] ) 
+            r_unit_2 = np.array([(r_unit_x_2*x_sign_2),(r_unit_y_2*y_sign_2)])
+
+            cosphi = np.dot(r_unit_2,r_unit_1)/(r_tot_2*r_tot_1)
+            dphi[j,i] = np.arccos(cosphi)
+            dl_vert[j,i] = dphi[j,i]*circle_R[i]
+        
+        dl_vert[0,i] = 2*np.pi*circle_R[i] - np.nansum(dl_vert[:,i])
+
+
+m.scatter(lon_vert,lat_vert,10,latlon=True,color='blue')
+m.scatter(circle_lon0,circle_lat0,10,latlon=True,color='blue')
+if which_circle=='mid':
+    m.scatter(rect_lon0,rect_lat0,10,latlon=True,color='red')   
+    m.scatter(lon_rect,lat_rect,10,latlon=True,color='red')
+
+
+
+# Gauss Method - Circle
+
+kdim = len(alt_ex)
+Div_g = np.zeros(kdim)
+Div_g_new = np.zeros(kdim)
+omega_new = np.zeros(kdim)*np.nan
+w_new = np.zeros(kdim)*np.nan
+pav = np.zeros(kdim)
+
+
+
+for k in range(len(alt_ex)):
+    D_incr_new=0
+
+    for it in range(nds):
+        if ~np.isnan(lon_sel[it]):
+            # length increment for integration on the perimeter
+            dl_incr = dl_vert[it,k]
+
+            if circle_lat0[k] > lat_vert[it,k]:
+                y_sign= -1
+            else:
+                y_sign= 1
+                
+            if circle_lon0[k] > lon_vert[it,k]:
+                x_sign= -1
+            else:
+                x_sign= 1
+                
+            # pressure coordinate in Pa for integration on the vertical
+            pav[k] = np.nanmean(p_sel[:,k])*100
+
+
+            # unit vectors of dropsonde position from the center of the pattern
+            dlon_sel=lon_vert[it,k]-circle_lon0[k]
+            dlat_sel=lat_vert[it,k]-circle_lat0[k]
+            r_unit_x = 1000. *  haversine(circle_lon0[k],circle_lat0[k],lon_vert[it,k],circle_lat0[k] ) 
+            r_unit_y = 1000. *  haversine(circle_lon0[k],circle_lat0[k],circle_lon0[k],lat_vert[it,k] ) 
+            r_tot = 1000. *  haversine(circle_lon0[k],circle_lat0[k],lon_vert[it,k],lat_vert[it,k] ) 
+            r_unix = x_sign*r_unit_x/r_tot
+            r_uniy = y_sign*r_unit_y/r_tot
+            r_unit = np.array([r_unix,r_uniy])
+
+            if k==0:
+                continue
+            
+            # transform lat-lon to cartesian
+            corr_xy  = np.array([np.cos([np.radians(dlon_sel)]),np.sin([np.radians(dlon_sel)])])
+            u_new  = u_sel[it,k]*corr_xy[0] - v_sel[it,k]*corr_xy[1]     
+            v_new  = v_sel[it,k]*corr_xy[0] + u_sel[it,k]*corr_xy[1]               
+            velocity_new=np.array([u_new,v_new])
+
+            # vector product to calculate the wind perpendicular to the surface 
+            D_incr_new = D_incr_new+np.dot(r_unit,velocity_new)*dl_incr
+
+    # dividing sum with area for line integral
+    Div_g_new [k] = D_incr_new * (1/(np.pi*circle_R[k]**2))
+
+
+# Gauss Method - Rectangle
+if which_circle=='mid':
+
+    kdim_rect = len(alt_rect)
+    Div_g_rect = np.zeros(kdim_rect)
+    Div_g_new_rect= np.zeros(kdim_rect)
+    omega_new_rect = np.zeros(kdim_rect)*np.nan
+    w_new_rect = np.zeros(kdim_rect)*np.nan
+    pav_rect = np.zeros(kdim_rect)
+    
+    dl_incr_x = np.ones(lat_rect.shape[1])*(np.nan)
+    dl_incr_y = np.ones(lat_rect.shape[1])*(np.nan)
+
+    for k in range(len(alt_rect)):
+
+        ul_corner = np.zeros(lon_rect.shape[0])
+        ll_corner = np.zeros(lon_rect.shape[0])
+        ur_corner = np.zeros(lon_rect.shape[0])
+        lr_corner = np.zeros(lon_rect.shape[0])
+
+        dl_incr_x[k]=1000. *  haversine(rect_lon0[k],np.nanmax(lat_rect[:,k]),rect_lon0[k],np.nanmin(lat_rect[:,k]))/3
+        dl_incr_y[k]=1000. *  haversine(np.nanmax(lon_rect[:,k]),rect_lat0[k],np.nanmin(lon_rect[:,k]),rect_lat0[k])/2
+
+        for it in range(nds_rect):
+            if ~np.isnan(lon_rect[it,k]):
+                if (lat_rect[it,k]>rect_lat0[k]+(np.nanmax(lat_rect[:,k])-rect_lat0[k])/2) or (lat_rect[it,k]<rect_lat0[k]-(np.nanmax(lat_rect[:,k])-rect_lat0[k])/2):
+                    if (lon_rect[it,k]>rect_lon0[k]+(np.nanmax(lon_rect[:,k])-rect_lon0[k])/2) or (lon_rect[it,k]<rect_lon0[k]-(np.nanmax(lon_rect[:,k])-rect_lon0[k])/2):
+                        if (rect_lat0[k] > lat_rect[it,k]) and (rect_lon0[k] > lon_rect[it,k]):
+                            ll_corner[it] = 1
+                            
+                        elif (rect_lat0[k] > lat_rect[it,k]) and (rect_lon0[k] < lon_rect[it,k]):
+                            lr_corner[it] = 1
+
+                        elif (rect_lat0[k] < lat_rect[it,k]) and (rect_lon0[k] > lon_rect[it,k]):
+                            ul_corner[it] = 1
+
+                        elif (rect_lat0[k] < lat_rect[it,k]) and (rect_lon0[k] < lon_rect[it,k]):
+                            ur_corner[it] = 1
+
+        # length of reactangle's sides
+        rect_l = np.squeeze( haversine(lon_rect[:,k][ll_corner==1],lat_rect[:,k][ll_corner==1],lon_rect[:,k][ul_corner==1],lat_rect[:,k][ul_corner==1]))
+        rect_r = np.squeeze( haversine(lon_rect[:,k][lr_corner==1],lat_rect[:,k][lr_corner==1],lon_rect[:,k][ur_corner==1],lat_rect[:,k][ur_corner==1]))
+        rect_u = np.squeeze( haversine(lon_rect[:,k][ul_corner==1],lat_rect[:,k][ul_corner==1],lon_rect[:,k][ur_corner==1],lat_rect[:,k][ur_corner==1]))
+        rect_d = np.squeeze( haversine(lon_rect[:,k][ll_corner==1],lat_rect[:,k][ll_corner==1],lon_rect[:,k][lr_corner==1],lat_rect[:,k][lr_corner==1]))
+
+
+        D_incr_rect=0
+        D_incr_new_rect=0
+
+        corners=0
+        lrsides=0
+        udsides=0
+        for it in range(nds_rect):
+            
+            # orientation of the sides of the rectangles, used later for unit vector computations
+            if ~np.isnan(lon_rect[it,k]):
+                if (lat_rect[it,k]<rect_lat0[k]+(np.nanmax(lat_rect[:,k])-rect_lat0[k])/2) and (lat_rect[it,k]>rect_lat0[k]-(np.nanmax(lat_rect[:,k])-rect_lat0[k])/2):
+                    lrsides=lrsides+1
+                    # left - right sides
+                    if rect_lon0[k] > lon_rect[it,k]:
+                        # left side
+                        x_sign = -1 
+                        y_sign = 0
+                    elif rect_lon0[k] < lon_rect[it,k]:
+                        # right side
+                        x_sign= 1 
+                        y_sign = 0
+
+                else:
+                    if (lon_rect[it,k]<rect_lon0[k]+(np.nanmax(lon_rect[:,k])-rect_lon0[k])/2) and (lon_rect[it,k]>rect_lon0[k]-(np.nanmax(lon_rect[:,k])-rect_lon0[k])/2):
+                        udsides=udsides+1
+                        # up - down sides
+                        if rect_lat0[k] > lat_rect[it,k]:
+                            # down side
+                            y_sign= -1
+                            x_sign= 0
+                        else:
+                            # upper side
+                            y_sign= 1 
+                            x_sign= 0
+                    else:
+                        # corners
+                        
+                        corners = corners + 1
+                        if rect_lat0[k] > lat_rect[it,k]:
+                            y_sign= -((1/2)**(1/2))* (1/2)
+                        else:
+                            y_sign= ((1/2)**(1/2)) * (1/2)
+
+                        if rect_lon0[k] > lon_rect[it,k]:
+                            x_sign = -((1/2)**(1/2)) * (1/2)
+
+                        elif rect_lon0[k] < lon_rect[it,k]:
+                            x_sign= ((1/2)**(1/2)) * (1/2)                        
+                    
+                # pressure coordinate in Pa for integration on the vertical
+                pav_rect[k] = np.nanmean(p_rect[:,k])*100
+
+                # length increment for integration on the perimeter
+                dlon_rect=lon_rect[it,k]-rect_lon0[k]
+                dlat_rect=lat_rect[it,k]-rect_lat0[k]
+
+                # unit vectors of dropsonde position from the center of the pattern
+                r_unix = x_sign*dl_incr_x[k]
+                r_uniy = y_sign *dl_incr_y[k]
+                r_tot = (rect_l*1000)*(rect_u*1000)
+                r_unit = np.array([r_unix,r_uniy])
+
+                if k==0:
+                    continue
+
+                
+                # tranform lat-lon to cartesian
+                corr_xy_rect  = np.array([np.cos([np.radians(dlon_rect)]),np.sin([np.radians(dlon_rect)])])
+                u_new_rect  = u_rect[it,k]*corr_xy_rect[0] - v_rect[it,k]*corr_xy_rect[1]     
+                v_new_rect  = v_rect[it,k]*corr_xy_rect[0] + u_rect[it,k]*corr_xy_rect[1]       
+                velocity_new_rect=np.array([u_new_rect,v_new_rect])
+
+                # vector product to calculate the wind perpendicular to the surface 
+                D_incr_new_rect = D_incr_new_rect+np.dot(r_unit,velocity_new_rect)
+
+        # dividing sum with area for line integral
+        Div_g_rect [k] = D_incr_rect * (1/(r_tot))
+        Div_g_new_rect [k] = D_incr_new_rect * (1/(r_tot))
+
+                        
+
+## DIvergence to vertical velocity           
+omega_new[0] = 0.
+w_new[0] = 0.
+
+for k in range(1,kdim):
+    dp = pav[k] - pav[k-1]
+    dz = alt_ex[k] - alt_ex[k-1]
+    omega_new[k]= omega_new[k-1]- Div_g_new[k-1] * dp         #pressure velocity
+    w_new[k]= w_new[k-1]- Div_g_new[k-1] * dz                 #vertical velocity
+
+if which_circle=='mid':
+    omega_new_rect[0] = 0.
+    w_new_rect[0] = 0.
+
+    for k in range(1,kdim_rect):
+        dp_rect = pav_rect[k] - pav_rect[k-1]
+        dz_rect = alt_rect[k] - alt_rect[k-1]
+
+
+        omega_new_rect[k]= omega_new_rect[k-1]- Div_g_new_rect[k-1] * dp_rect        #pressure velocity    
+        w_new_rect[k]= w_new_rect[k-1]- Div_g_new_rect[k-1] * dz_rect                #vertical velocity
+
+
+
+if which_circle=='mid':
+    print('list of rectangle sondes: ',len(sondes_rect),nds_rect,len(lon_rect[~np.isnan(lon_rect)]),len(lat_rect[~np.isnan(lat_rect)]))
+
+print('list of circle sondes: ',len(sondes_sel),nds,len(lon_sel[~np.isnan(lon_sel)]),len(lat_sel[~np.isnan(lat_sel)]))
+
+
+ax[0].plot(Div_g_new[:]*10**5,alt_ex/1000,color=[0,0.4,0.8,1],linewidth=1.7)
+if which_circle == 'mid':
+    ax[0].plot(Div_g_new_rect[:]*10**5,alt_rect/1000,color=[0,0.7,0,1],linewidth=1.7)
+    
+[ax[nn].plot(np.zeros(len(alt_ex)),alt_ex/1000,linewidth=0.5,linestyle='--',color='black') for nn in range(ax.shape[0])]
+ax[0].plot(2*np.ones(len(alt_ex)),alt_ex/1000,linewidth=0.5,linestyle='--',color='black')
+ax[0].plot(-2*np.ones(len(alt_ex)),alt_ex/1000,linewidth=0.5,linestyle='--',color='black')
+ax[0].set_xlabel(r"$D$  [$10^{-5}$ s$^{-1}$]",fontsize=14)
+ax[0].set_ylabel(r"Altitude $[km]$",fontsize=14)
+ax[0].set_xlim([-2.5,2.5])
+
+ax[1].plot(omega_new[:],alt_ex/1000,label='Gauss-HALO',color=[0,0.4,0.8,1],linewidth=1.7)
+if which_circle == 'mid':
+    ax[1].plot(omega_new_rect[:],alt_rect/1000,label='Gauss-P5',color=[0,0.7,0,1],linewidth=1.7)
+
+ax[1].set_xlabel(r"$\Omega$  [Pa s$^{-1}$]",fontsize=14)
+ax[1].set_xticks([-0.5,-0.25,0,0.25,0.5])
+ax[1].legend(loc='upper left',fontsize=14)
+fig.suptitle('HALO(RF11) - P5(RF05)',y=0.94,fontsize=14)
+
+# ax[2].plot(w_new[:],alt_ex/1000,label='Gauss-HALO',color=[0,0.4,0.8,1],linewidth=1.7)
+# if which_circle == 'mid':
+#     ax[2].plot(w_new_rect[:],alt_rect/1000,label='Gauss-P5',color=[1,0,0,1],linewidth=1.7)
+# ax[2].set_xlabel(r"$w$  [m s$^{-1}$]",fontsize=14)
+# ax[2].set_xticks([-0.02,0,0.02])
+# ax[2].set_xlim([-0.03,0.03])
+
+[ax[nn].set_ylim([0,8]) for nn in range(ax.shape[0])]
+[ax[tck].tick_params(axis='y', labelsize=14 ) for tck in range(ax.shape[0])]
+[ax[tck].tick_params(axis='x', labelsize=14 ) for tck in range(ax.shape[0])]
+
+
+
+
+if ncd_save:
+    ds_circle = xr.Dataset(
+        data_vars=dict(
+            Div = (["alt"], Div_g_new),
+            omega = (["alt"], omega_new),
+            w = (["alt"], w_new),
+            lat = (["nds"], lat_sel[~np.isnan(lat_sel)]),
+            lon = (["nds"], lon_sel[~np.isnan(lat_sel)]),
+            sondes = (["nds"], np.array(sondes_sel)),
+
+
+        ),
+        coords=dict(
+            alt = alt_ex,
+
+        ),
+    )
+    if which_circle == 'mid':
+        ds_rectangle = xr.Dataset(
+            data_vars=dict(
+                Div = (["alt"], Div_g_new_rect),
+                omega = (["alt"], omega_new_rect),
+                w = (["alt"], w_new_rect),
+                lat = (["nds","alt"], lat_rect[0:10,:]),
+                lon = (["nds","alt"], lon_rect[0:10,:]),
+                sondes = (["nds"], np.array(sondes_rect))
+
+
+            ),
+            coords=dict(
+                alt = alt_rect,
+
+
+            ),
+
+
+
+    )
+
+    if RFc == RF11:
+        ds_circle.to_netcdf('MK_'+coordinates[circle_id[which_circle]]['RF']+'_circle#'+str(circle_id[which_circle])+'_var_R.nc')
+    else:
+        ds_circle.to_netcdf('MK_'+coordinates[circle_id[which_circle]]['RF']+'circle_var_R.nc')
+    ds_circle.close()
+
+    if which_circle == 'mid':
+        ds_rectangle.to_netcdf('MK_RF08_rectangle_1527_var_R.nc')
+        ds_rectangle.close()
+
+
+plt.show()
