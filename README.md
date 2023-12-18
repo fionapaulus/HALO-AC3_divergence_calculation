@@ -1,6 +1,6 @@
-# Code publication to Paulus et al. - Airborne measurements of mesoscale divergence at high latitudes during HALO-(AC)$^3$
+# Code publication to Paulus et al. - Airborne measurements of mesoscale divergence at high latitudes during HALO-(AC)³
 
-Calculation of divergence and subsidence from dropsondes released during HALO-(AC)$^3$ campaign in circular and rectangular flight patterns with two methods: 
+Calculation of divergence and subsidence from dropsondes released during HALO-(AC)³ campaign in circular and rectangular flight patterns with two methods: 
 
 * Line-Integral method
 * Regression method
